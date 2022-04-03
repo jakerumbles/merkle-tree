@@ -49,14 +49,10 @@ impl MerkleTree {
         let mut hashed_transactions: Vec<MerkleNode> = vec![];
 
         for (_, val) in leaves.0.iter().enumerate() {
-            println!("{}", val);
+            // println!("{}", val);
 
-            // Need to create a new hasher each loop because they save state. Need to start fresh each hash.
-            let mut hasher = DefaultHasher::new();
-            // Feed value into the hasher
-            val.hash(&mut hasher);
-            // Actually hash the value
-            let hash = hasher.finish();
+            // Hash the serialized transaction `val`
+            let hash = MerkleTree::hash_single(&val);
 
             let new_node = MerkleNode::new(hash, None);
             hashed_transactions.push(new_node);
@@ -76,8 +72,50 @@ impl MerkleTree {
         &self.leaves
     }
 
-    pub fn build_tree() {
+    /// Construct the Merkle Tree from the `leaves`. Once complete, returns the merkle root hash.
+    pub fn build_tree(&mut self) -> u64 {
         // much wow 🐕
+        for i in (0..self.leaves.len()).step_by(2) {
+            println!("i: {}, Node: {:?}", i, self.leaves[i]);
+
+            let hash1 = self.leaves[i].hash;
+            let hash2 = self.leaves[i + 1].hash;
+
+            // Compute new hash from 2 child hashes
+            let combined_hash = MerkleTree::hash_double(hash1, hash2);
+
+            // Create new MerkleNode from `combined_hash`
+            let new_node = Rc::new(MerkleNode::new(combined_hash, None));
+
+            println!("Strong Count: {}", Rc::strong_count(&new_node));
+
+            // Link child nodes to `new_node`
+            let node1 = &mut self.leaves[i];
+            node1.set_pointer(Rc::clone(&new_node));
+            println!("Strong Count: {}", Rc::strong_count(&new_node));
+
+            let mut node2 = &mut self.leaves[i + 1];
+        }
+
+        25
+    }
+
+    fn hash_single(val: &String) -> u64 {
+        // Need to create a new hasher each loop because they save state. Need to start fresh each hash.
+        let mut hasher = DefaultHasher::new();
+
+        // Feed value into the hasher
+        val.hash(&mut hasher);
+
+        // Actually hash the value
+        hasher.finish()
+    }
+
+    fn hash_double(val1: u64, val2: u64) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        val1.hash(&mut hasher);
+        val2.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -90,6 +128,10 @@ pub struct MerkleNode {
 impl MerkleNode {
     fn new(hash: u64, pointer: Option<Rc<MerkleNode>>) -> Self {
         MerkleNode { hash, pointer }
+    }
+
+    fn set_pointer(&mut self, node: Rc<MerkleNode>) {
+        self.pointer = Some(node);
     }
 }
 

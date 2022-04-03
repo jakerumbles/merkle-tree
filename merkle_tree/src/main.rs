@@ -12,9 +12,11 @@ fn main() {
 
     let transactions = Transactions::new(vec_transactions);
 
-    let merkle_tree = MerkleTree::new(transactions);
+    let mut merkle_tree = MerkleTree::new(transactions);
 
     for node in merkle_tree.leaves() {
         println!("{:?}", node);
     }
+
+    merkle_tree.build_tree();
 }
