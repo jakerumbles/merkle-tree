@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -39,14 +40,15 @@ impl Transactions {
 }
 
 pub struct MerkleTree {
-    merkle_root: Option<Rc<MerkleNode>>,
-    leaves: Vec<MerkleNode>,
+    merkle_root: Option<Rc<RefCell<MerkleNode>>>,
+    nodes: Vec<Vec<Rc<RefCell<MerkleNode>>>>,
+    tree_height: usize,
 }
 
 impl MerkleTree {
     /// Hash all transactions provided and create `MerkleNode`s for each corresponding hash. Finally store `MerkleNode`s in `leaves` vector.
     pub fn new(leaves: Transactions) -> Self {
-        let mut hashed_transactions: Vec<MerkleNode> = vec![];
+        let mut hashed_transactions: Vec<Rc<RefCell<MerkleNode>>> = vec![];
 
         for (_, val) in leaves.0.iter().enumerate() {
             // println!("{}", val);
@@ -54,50 +56,75 @@ impl MerkleTree {
             // Hash the serialized transaction `val`
             let hash = MerkleTree::hash_single(&val);
 
-            let new_node = MerkleNode::new(hash, None);
-            hashed_transactions.push(new_node);
+            let new_node = Rc::new(RefCell::new(MerkleNode::new(hash, None)));
+            hashed_transactions.push(Rc::clone(&new_node));
         }
 
+        // Hardcoded for 4 transactions
+        let tree_height = MerkleTree::compute_tree_height(hashed_transactions.len());
+        println!("\nTree Height: {}\n", tree_height);
+
+        // Create vector of vectors. Top level is each level of tree. Inner lever is for holding all `MerkleNodes` in each level.
+        let mut hashed_transactions = vec![hashed_transactions];
+        for _ in 1..tree_height {
+            hashed_transactions.push(vec![]);
+        }
         MerkleTree {
             merkle_root: None,
-            leaves: hashed_transactions,
+            nodes: hashed_transactions,
+            tree_height,
         }
     }
 
-    pub fn merkle_root(&self) -> &Option<Rc<MerkleNode>> {
+    pub fn merkle_root(&self) -> &Option<Rc<RefCell<MerkleNode>>> {
         &self.merkle_root
     }
 
-    pub fn leaves(&self) -> &Vec<MerkleNode> {
-        &self.leaves
+    pub fn nodes(&self) -> &Vec<Vec<Rc<RefCell<MerkleNode>>>> {
+        &self.nodes
     }
 
     /// Construct the Merkle Tree from the `leaves`. Once complete, returns the merkle root hash.
     pub fn build_tree(&mut self) -> u64 {
         // much wow 🐕
-        for i in (0..self.leaves.len()).step_by(2) {
-            println!("i: {}, Node: {:?}", i, self.leaves[i]);
 
-            let hash1 = self.leaves[i].hash;
-            let hash2 = self.leaves[i + 1].hash;
+        let mut new_node: Rc<RefCell<MerkleNode>> =
+            Rc::new(RefCell::new(MerkleNode::new(420, None)));
+        let mut combined_hash: u64 = 0;
 
-            // Compute new hash from 2 child hashes
-            let combined_hash = MerkleTree::hash_double(hash1, hash2);
+        for layer in 0..self.tree_height - 1 {
+            for i in (0..self.nodes[layer].len()).step_by(2) {
+                println!(
+                    "Creating new node. Layer: {}, i: {}, i+1: {}",
+                    layer,
+                    i,
+                    i + 1
+                );
 
-            // Create new MerkleNode from `combined_hash`
-            let new_node = Rc::new(MerkleNode::new(combined_hash, None));
+                let hash1 = self.nodes[layer][i].borrow().hash;
+                let hash2 = self.nodes[layer][i + 1].borrow().hash;
 
-            println!("Strong Count: {}", Rc::strong_count(&new_node));
+                // Compute new hash from 2 child hashes
+                combined_hash = MerkleTree::hash_double(hash1, hash2);
 
-            // Link child nodes to `new_node`
-            let node1 = &mut self.leaves[i];
-            node1.set_pointer(Rc::clone(&new_node));
-            println!("Strong Count: {}", Rc::strong_count(&new_node));
+                // Create new MerkleNode from `combined_hash`
+                new_node = Rc::new(RefCell::new(MerkleNode::new(combined_hash, None)));
 
-            let mut node2 = &mut self.leaves[i + 1];
+                // Push new node into `layer` + 1 vec
+                self.nodes[layer + 1].push(Rc::clone(&new_node));
+
+                // Link child nodes to `new_node`
+                let node1 = &mut self.nodes[layer][i].borrow_mut();
+                node1.set_pointer(Rc::clone(&new_node));
+
+                let node2 = &mut self.nodes[layer][i + 1].borrow_mut();
+                node2.set_pointer(Rc::clone(&new_node));
+            }
         }
 
-        25
+        // This means we have finished computing the merkle root and can return the final hash
+        self.merkle_root = Some(Rc::clone(&new_node));
+        combined_hash
     }
 
     fn hash_single(val: &String) -> u64 {
@@ -117,29 +144,47 @@ impl MerkleTree {
         val2.hash(&mut hasher);
         hasher.finish()
     }
+
+    pub fn compute_tree_height(num_transactions: usize) -> usize {
+        let height = ((num_transactions as f64).log2() as usize) + 1;
+        height
+    }
 }
 
 #[derive(Debug)]
 pub struct MerkleNode {
     hash: u64,
-    pointer: Option<Rc<MerkleNode>>,
+    pointer: Option<Rc<RefCell<MerkleNode>>>,
 }
 
 impl MerkleNode {
-    fn new(hash: u64, pointer: Option<Rc<MerkleNode>>) -> Self {
+    fn new(hash: u64, pointer: Option<Rc<RefCell<MerkleNode>>>) -> Self {
         MerkleNode { hash, pointer }
     }
 
-    fn set_pointer(&mut self, node: Rc<MerkleNode>) {
+    fn set_pointer(&mut self, node: Rc<RefCell<MerkleNode>>) {
         self.pointer = Some(node);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn correct_merkle_root() {
+        let vec_transactions: Vec<Transaction> = vec![
+            Transaction::new(String::from("Bob"), String::from("Alice"), 12),
+            Transaction::new(String::from("Alice"), String::from("Jake"), 25),
+            Transaction::new(String::from("Jake"), String::from("Bob"), 7),
+            Transaction::new(String::from("Eric"), String::from("Bob"), 82),
+        ];
+
+        let transactions = Transactions::new(vec_transactions);
+
+        let mut merkle_tree = MerkleTree::new(transactions);
+
+        let merkle_root = merkle_tree.build_tree();
+
+        assert_eq!(merkle_root, 7978775544804379803);
     }
 }

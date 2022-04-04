@@ -1,8 +1,6 @@
 use merkle_tree::{MerkleTree, Transaction, Transactions};
 
 fn main() {
-    let test = Transaction::new(String::from("Bob"), String::from("Alice"), 12);
-
     let vec_transactions: Vec<Transaction> = vec![
         Transaction::new(String::from("Bob"), String::from("Alice"), 12),
         Transaction::new(String::from("Alice"), String::from("Jake"), 25),
@@ -14,9 +12,13 @@ fn main() {
 
     let mut merkle_tree = MerkleTree::new(transactions);
 
-    for node in merkle_tree.leaves() {
-        println!("{:?}", node);
+    for node in merkle_tree.nodes() {
+        for node in node {
+            println!("{:?}", node);
+        }
     }
 
-    merkle_tree.build_tree();
+    let merkle_root = merkle_tree.build_tree();
+
+    println!("Merkle Root: {}", merkle_root);
 }
